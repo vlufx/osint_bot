@@ -5,6 +5,7 @@ import logging
 import phonenumbers
 from phonenumbers import geocoder, carrier
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.enums import ParseMode
@@ -33,6 +34,27 @@ bot = Bot(
 # Подключение сессии Telethon (использует checker_session.session из папки)
 session_file = "checker_session"
 telethon_client = TelegramClient(session_file, API_ID, API_HASH)
+
+# --- ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА (HEALTH CHECK) ---
+
+async def handle_health_check(request):
+    """Отвечает 200 OK на проверки порта от Render."""
+    return web.Response(text="Bot is running!")
+
+async def start_fake_web_server():
+    """Запускает веб-сервер на порту, который требует Render."""
+    app = web.Application()
+    app.router.add_get("/", handle_health_check)
+    app.router.add_get("/health", handle_health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render передает номер порта через переменную окружения PORT
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Фейковый веб-сервер запущен на порту {port}")
 
 # --- ФУНКЦИИ ОСИНТ-ПОИСКА ---
 
@@ -149,8 +171,14 @@ async def handle_search(message: types.Message):
 # --- ЗАПУСК ---
 
 async def main():
+    # 1. Запускаем фейковый веб-сервер параллельно с ботом
+    await start_fake_web_server()
+    
+    # 2. Запускаем Telethon
     if telethon_client:
         await telethon_client.start()
+        
+    # 3. Запускаем polling бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
